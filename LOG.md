@@ -100,3 +100,47 @@ reducers (ddmin, ProbDD, CDD, crux) from rewriting reducers (shrinkray, Perses,
 C-Reduce), or the size column silently measures "has rewrite passes" rather
 than "searches well". Recorded now so it cannot be quietly forgotten when the
 numbers arrive.
+
+### Manager verification of the architect's reframing (mid-round-0)
+
+The architect came back with the premise relocated rather than dead: it
+retracted "permanently critical" and the free 1-minimality certificate
+outright (correct — `{` is undeletable alone and deletable with `}`), and
+argued the search itself never relies on monotonicity, only the termination
+certificate does, so a measured audit sweep restores soundness under an
+arbitrarily non-monotone oracle at a cost of roughly `2k` out of a
+`k·log₂(n/k)+3k` budget. It also rebutted my "scattered sets" objection
+concretely: its `CritScan` issues only contiguous spans of the current kept
+set, so it lands in the 22.9% column with ddmin rather than the 6.5% column
+with ProbDD. That rebuttal is load-bearing and is instrumented to be checked
+rather than assumed, which is the right disposition.
+
+The claim that most changes the framing is that after grammar-free brace
+snapping, C++ candidates that still fail do so mostly for *semantic* reasons,
+not syntactic ones — because that bounds how much any structural layer can buy.
+I checked it independently rather than take it on faith, writing my own probe
+without reading theirs (`crux/bench/measure/manager_semantic_check.py`). I get
+**54.5% semantic, 21.9% syntax, 23.5% other** on 187 failures; the architect
+reported 64.1% / 11.1%. The exact split differs with the classifier and the
+snapping implementation, but the direction is robust: semantic failures
+outnumber syntactic ones by somewhere between 2.5x and 6x. A grammar or
+parse-tree candidate space removes the syntax slice, which is the minority.
+That is a real and slightly counterintuitive result, and it argues that
+extracting more information per negative query matters *more* in this regime,
+not less.
+
+One caveat I am recording against our own interest, because the architect's
+framing understates Perses: the parse-tree layer per se addresses the syntax
+slice, but Perses ships additional machinery aimed squarely at the semantic
+class — `--enable-mimir-delete-def-with-all-its-concrete-uses` exists precisely
+to delete a definition together with its uses, which is the
+`undeclared identifier` failure mode. It is off by default. So "Perses removes
+the 11%, not the 64%" is true of its default configuration and of the
+grammar layer in isolation, and would be unfair as a blanket statement about
+the tool. When we run Perses in Round 5 we should report the default
+configuration as the headline and note this flag exists.
+
+Next action: the architect's kill criterion — `ρ = calls / (k·(log₂(n/k)+4))`
+on monotone `hit-k-n` with `n ≥ 4096`, `n/k ≥ 32`, abandon if `ρ > 2.5` — runs
+first in Round 1, before any other Round 1 work, because it costs minutes and
+gates everything after it.
