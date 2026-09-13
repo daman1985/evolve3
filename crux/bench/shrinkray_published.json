@@ -1,0 +1,156 @@
+{
+  "black-20.8b1-docstring-extra-quote-crash": {
+    "format": "python",
+    "original_bytes": 3124,
+    "shrinkray_reduced_bytes": 17,
+    "shrinkray_reduced_nows": 15,
+    "tool": "black 20.8b1"
+  },
+  "clang35-variadic-callback-blockdecl": {
+    "format": "cpp",
+    "original_bytes": 1005,
+    "shrinkray_reduced_bytes": 201,
+    "shrinkray_reduced_nows": 188,
+    "tool": "clang (silkeh/clang:3.5)"
+  },
+  "gcc49-pr61636-genlambda-member": {
+    "format": "cpp",
+    "original_bytes": 1395,
+    "shrinkray_reduced_bytes": 79,
+    "shrinkray_reduced_nows": 72,
+    "tool": "gcc (gcc:4.9)"
+  },
+  "gcc49-pr64382-genlambda-template-member": {
+    "format": "cpp",
+    "original_bytes": 879,
+    "shrinkray_reduced_bytes": 128,
+    "shrinkray_reduced_nows": 119,
+    "tool": "gcc (gcc:4.9)"
+  },
+  "gcc49-pr77739-variadic-auto-lambda": {
+    "format": "cpp",
+    "original_bytes": 1004,
+    "shrinkray_reduced_bytes": 166,
+    "shrinkray_reduced_nows": 160,
+    "tool": "gcc (gcc:4.9)"
+  },
+  "gcc49-udlit-char-pack-template": {
+    "format": "cpp",
+    "original_bytes": 834,
+    "shrinkray_reduced_bytes": 126,
+    "shrinkray_reduced_nows": 122,
+    "tool": "gcc (gcc:4.9)"
+  },
+  "go11810-generic-untyped-bool-ice": {
+    "format": "go",
+    "original_bytes": 2288,
+    "shrinkray_reduced_bytes": 220,
+    "shrinkray_reduced_nows": 181,
+    "tool": "go 1.18.10 (gc)"
+  },
+  "jq-1.5-cve-2016-4074-deep-nest-segfault": {
+    "format": "json",
+    "original_bytes": 120426,
+    "shrinkray_reduced_bytes": null,
+    "shrinkray_reduced_nows": null,
+    "tool": "jq 1.5"
+  },
+  "kissat402-decide-disconnected": {
+    "format": "cnf",
+    "original_bytes": 4295,
+    "shrinkray_reduced_bytes": 536,
+    "shrinkray_reduced_nows": 349,
+    "tool": "kissat 4.0.2"
+  },
+  "minisat-dimacs-int-overflow": {
+    "format": "cnf",
+    "original_bytes": 2326,
+    "shrinkray_reduced_bytes": 14,
+    "shrinkray_reduced_nows": 12,
+    "tool": "minisat 2.2 (git 37dc6c6, ASan)"
+  },
+  "mypy-0.942-match-union-tuple-crash": {
+    "format": "python",
+    "original_bytes": 2537,
+    "shrinkray_reduced_bytes": 133,
+    "shrinkray_reduced_nows": 77,
+    "tool": "mypy 0.942"
+  },
+  "prettier-3.6.2-css-comma-custom-property-crash": {
+    "format": "css",
+    "original_bytes": 1687,
+    "shrinkray_reduced_bytes": 4,
+    "shrinkray_reduced_nows": 3,
+    "tool": "prettier 3.6.2"
+  },
+  "pylint-2.17.4-duplicate-bases-mro-crash": {
+    "format": "python",
+    "original_bytes": 2403,
+    "shrinkray_reduced_bytes": 51,
+    "shrinkray_reduced_nows": 34,
+    "tool": "pylint 2.17.4 (astroid 2.15.5)"
+  },
+  "python-rapidjson-10-deep-nest-segfault": {
+    "format": "json",
+    "original_bytes": 200426,
+    "shrinkray_reduced_bytes": null,
+    "shrinkray_reduced_nows": null,
+    "tool": "python-rapidjson 1.0"
+  },
+  "ruff-0.0.277-isort-skip-block-panic": {
+    "format": "python",
+    "original_bytes": 2774,
+    "shrinkray_reduced_bytes": 56,
+    "shrinkray_reduced_nows": 38,
+    "tool": "ruff 0.0.277"
+  },
+  "rustc-1941-gce-braced-const-arg-ice": {
+    "format": "rust",
+    "original_bytes": 2480,
+    "shrinkray_reduced_bytes": 141,
+    "shrinkray_reduced_nows": 111,
+    "tool": "rustc 1.94.1"
+  },
+  "shrinkray-json-deep-nesting": {
+    "format": "json",
+    "original_bytes": 1495,
+    "shrinkray_reduced_bytes": 608,
+    "shrinkray_reduced_nows": 602,
+    "tool": "python json (deep-nesting regression)"
+  },
+  "shrinkray-libcst-deep-nesting": {
+    "format": "python",
+    "original_bytes": 4378,
+    "shrinkray_reduced_bytes": 800,
+    "shrinkray_reduced_nows": 800,
+    "tool": "libcst 1.8.6 (deep-nesting regression)"
+  },
+  "splr0172-eliminate-assert": {
+    "format": "cnf",
+    "original_bytes": 3148,
+    "shrinkray_reduced_bytes": 329,
+    "shrinkray_reduced_nows": 209,
+    "tool": "splr 0.17.2 (debug-assertions)"
+  },
+  "terser-5151-forof-empty-pattern-crash": {
+    "format": "javascript",
+    "original_bytes": 2945,
+    "shrinkray_reduced_bytes": 24,
+    "shrinkray_reduced_nows": 22,
+    "tool": "terser 5.15.1"
+  },
+  "tsc-5.8.2-object-entries-setstate-crash": {
+    "format": "typescript",
+    "original_bytes": 1637,
+    "shrinkray_reduced_bytes": 80,
+    "shrinkray_reduced_nows": 46,
+    "tool": "typescript 5.8.2 (tsc)"
+  },
+  "ujson-510-indent-buffer-overflow": {
+    "format": "json",
+    "original_bytes": 826,
+    "shrinkray_reduced_bytes": 110,
+    "shrinkray_reduced_nows": 92,
+    "tool": "ujson 5.1.0"
+  }
+}
