@@ -39,20 +39,37 @@ number.
 
 Process isolation: each (method, instance) run happens in its own forked
 child process (mirroring crux/bench/run.py's own established pattern, for
-the same reason it exists there) with a wall-clock timeout AND a virtual-
-memory cap (RLIMIT_AS). This was not a defensive default -- it was added
-after ddmin_picire's own ConfigCache (see baselines/ddmin_picire.py; a
-recent, correct, faithfulness fix by another engineer working in this repo
-concurrently) was observed to exhaust available memory at n=32768 running
-in-process: ConfigCache keys by the exact index sequence, so at this scale
-each cached miss can retain a full-length tuple of large (non-interned)
-Python ints, and a run with tens of thousands of distinct large configs can
-require tens of gigabytes. That is an honest property of the faithful
-picire configuration being run for context, not a bug to route around --
-isolating it means one baseline's memory profile at the largest instance
-cannot take down crux's own measurement (the actual gate) or any other
-cell in the table. A crashed/killed/timed-out context run is reported as
-exactly that, plainly, rather than silently omitted.
+the same reason it exists there) with a wall-clock timeout. This was not a
+defensive default -- it was added after ddmin_picire's own ConfigCache (see
+baselines/ddmin_picire.py; a recent, correct, faithfulness fix by another
+engineer working in this repo concurrently) was observed to exhaust
+available memory at n=32768 running in-process: ConfigCache keys by the
+exact index sequence, so at this scale each cached miss can retain a
+full-length tuple of large (non-interned) Python ints, and a run with tens
+of thousands of distinct large configs can require tens of gigabytes. That
+is an honest property of the faithful picire configuration being run for
+context, not a bug to route around -- isolating it means one baseline's
+memory profile at the largest instance cannot take down crux's own
+measurement (the actual gate) or any other cell in the table. A crashed or
+timed-out context run is reported as exactly that, plainly, rather than
+silently omitted.
+
+An earlier version of this script also imposed a per-child RLIMIT_AS
+(virtual address space) cap, on the theory that a clean, catchable
+MemoryError beats an uncontrolled SIGKILL. Measurement showed that theory
+wrong: RLIMIT_AS bounds virtual address space, not resident memory, and
+CPython's allocator (plus glibc arena fragmentation across many alloc/free
+cycles) can inflate a process's mapped address space well past what it is
+actually using -- a run of crux ITSELF (k=1024, n=32768, the exact case an
+uncapped run completed correctly and quickly earlier in the same
+investigation) was falsely reported as crashed under a 4GiB cap. Since
+subprocess isolation plus the wall-clock timeout already gives every
+failure mode that matters -- a run that hangs is killed by the timeout, a
+run that is OS-OOM-killed still reports as "child exited with no result"
+via the exact same fallback path below -- the address-space cap bought
+nothing but false positives on legitimate, cheaper-than-it-looks workloads.
+Removed. Report this as a caution to whoever next reaches for RLIMIT_AS as
+a Python memory guard.
 """
 from __future__ import annotations
 
@@ -102,7 +119,6 @@ QUICK_INSTANCES = [
 METHOD_NAMES = ["crux", "ddmin_picire", "probdd"]
 
 PER_RUN_TIMEOUT = 90.0  # seconds; matches crux/bench/run.py's own DEFAULT_TIMEOUT
-PER_RUN_MEM_LIMIT_BYTES = 4 * 1024 ** 3  # 4 GiB/run; see module docstring
 
 
 def geomean(values) -> Optional[float]:
@@ -135,19 +151,13 @@ def _call_method(name: str, problem: ReductionProblem, kept: tuple):
 
 def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, conn) -> None:
     # A Pipe, not a Queue: Queue.put() lazily starts an internal feeder
-    # thread on first use, and observed in practice (see the reducer-
-    # engineer report): a process that has just hit RLIMIT_AS can be too
-    # memory-starved to start that thread, turning a clean, reportable
-    # MemoryError into an unreported SIGKILL-equivalent crash. Connection.send()
-    # writes directly with no new thread, so the error still gets home even
-    # from a process this constrained.
+    # thread on first use, which can itself fail under memory pressure
+    # (observed in practice on an earlier, RLIMIT_AS-capped version of this
+    # script -- see the module docstring). Connection.send() writes
+    # directly with no new thread, so an error report still gets home even
+    # from a badly memory-starved process, with no downside on the normal
+    # path.
     try:
-        try:
-            import resource
-            resource.setrlimit(resource.RLIMIT_AS, (PER_RUN_MEM_LIMIT_BYTES, PER_RUN_MEM_LIMIT_BYTES))
-        except Exception:
-            pass  # best-effort only; never fatal if the platform disallows it
-
         oracle = Oracle(raw_predicate, budget=budget)
         problem = ReductionProblem(elements, oracle)
         start = time.perf_counter()
@@ -178,7 +188,7 @@ def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, 
         }))
     except MemoryError:
         try:
-            conn.send(("error", "MemoryError (hit the per-run RLIMIT_AS cap)"))
+            conn.send(("error", "MemoryError (ran out of real memory)"))
         except Exception:
             pass  # even the error report didn't fit; the parent's exitcode fallback still reports this cell
     except Exception:
@@ -220,7 +230,13 @@ def run_one_method(method_name: str, elements, raw_predicate, n: int, budget: in
                 result_row = _empty_row(crashed=True, seconds=time.monotonic() - start, error=payload)
         except EOFError:
             pass  # child died before finishing its send -- fall through to the exitcode-based report below
-    proc.join(max(0.0, PER_RUN_TIMEOUT - (time.monotonic() - start)))
+
+    # Once we already have an answer, a slow-to-actually-exit child (final
+    # interpreter teardown, etc.) is just cleanup, not a timeout -- give it
+    # a short grace period rather than the full remaining budget, and never
+    # let that grace period downgrade a real result into a false TIMEOUT.
+    remaining = max(0.0, PER_RUN_TIMEOUT - (time.monotonic() - start))
+    proc.join(remaining if result_row is None else min(remaining, 5.0))
 
     if proc.is_alive():
         proc.terminate()
@@ -229,6 +245,8 @@ def run_one_method(method_name: str, elements, raw_predicate, n: int, budget: in
             proc.kill()
             proc.join()
         parent_conn.close()
+        if result_row is not None:
+            return result_row
         return _empty_row(timed_out=True, seconds=time.monotonic() - start,
                            error=f"exceeded the {PER_RUN_TIMEOUT:.0f}s per-run wall-clock cap")
 
@@ -236,12 +254,12 @@ def run_one_method(method_name: str, elements, raw_predicate, n: int, budget: in
     if result_row is not None:
         return result_row
 
-    # Process exited without ever sending anything: killed (OOM / RLIMIT_AS
-    # / SIGKILL) rather than raising a catchable exception.
+    # Process exited without ever sending anything: killed (most likely
+    # OS-OOM SIGKILL) rather than raising a catchable exception.
     return _empty_row(
         crashed=True, seconds=time.monotonic() - start,
         error=f"child exited with code {proc.exitcode} and produced no result "
-              f"(likely killed -- exceeded the {PER_RUN_MEM_LIMIT_BYTES // (1024**3)}GiB memory cap, or OOM)",
+              f"(likely killed by the OS, e.g. out of memory)",
     )
 
 
@@ -385,7 +403,7 @@ def main(argv=None) -> int:
 
     print(f"Running {len(instances)} instance(s) x {len(METHOD_NAMES)} methods "
           f"({'quick subset' if args.quick else 'full spread'}), "
-          f"{PER_RUN_TIMEOUT:.0f}s timeout / {PER_RUN_MEM_LIMIT_BYTES // (1024**3)}GiB cap per run...", file=sys.stderr)
+          f"{PER_RUN_TIMEOUT:.0f}s wall-clock timeout per run...", file=sys.stderr)
 
     results = []
     for (k, n) in instances:
