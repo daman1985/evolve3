@@ -69,3 +69,34 @@ structural awareness moves from Round 3 to Round 1 because it is load-bearing
 for soundness. Grammar-free structural reduction is explicitly not claimed as
 novel — Perses already ships `dyck-brace` modes. The architect has been sent
 the data and told to kill the idea outright if it does not survive it.
+
+### Calibration note (mid-round-0): shrinkray on a monotone toy task
+
+Before trusting any head-to-head later, I calibrated the SOTA tool on a
+deliberately easy task: 300 lines, 3 of them required, oracle = plain substring
+grep with **no syntax requirement**, so the predicate is genuinely monotone —
+the best possible case for the MUS argument and an easy case generally.
+
+shrinkray used **2256 oracle calls** and returned 41 bytes. Two things worth
+recording.
+
+First, the headroom signal. On a monotone oracle with n=300 and k=3, the
+MUS-extraction bound O(k log(n/k)) is on the order of 20-60 queries. shrinkray
+spent 2256 — roughly 7.5 calls per input line. Some of that is real work beyond
+finding the three lines (it kept going at character granularity, and it has a
+fixpoint/restart phase), so this is not a like-for-like 40x gap. But it is the
+first concrete evidence that the gap between what the theory allows and what
+the best available tool spends is large rather than marginal, on exactly the
+task shape where the theory should apply cleanly.
+
+Second, an asymmetry I need to be honest about in every size comparison from
+here on. The input order was TARGET_17, TARGET_100, TARGET_255; shrinkray
+returned `TARGET_100 = 1TARGET_17 = 1TARGET_255 = 1` — reordered, and with the
+newlines deleted. It beat the naive delete-only optimum (44 bytes) by
+**rewriting**, not just deleting. crux is delete-only, so its search space is
+strictly smaller and it can lose on size for reasons that have nothing to do
+with search quality. Size comparisons must therefore separate delete-only
+reducers (ddmin, ProbDD, CDD, crux) from rewriting reducers (shrinkray, Perses,
+C-Reduce), or the size column silently measures "has rewrite passes" rather
+than "searches well". Recorded now so it cannot be quietly forgotten when the
+numbers arrive.
