@@ -39,6 +39,7 @@ class Task:
     predicate_on_kept: Callable[[tuple], bool]
     granularity: Optional[str] = None  # "line" | "char" | None (synthetic)
     known_optimum: Optional[int] = None  # in ELEMENTS; synthetic tasks only
+    known_optimum_bytes: Optional[int] = None  # byte size of that same known-optimal witness set; synthetic tasks only
     reference_bytes: Optional[int] = None  # informational; corpus tasks only
     reference_valid: Optional[bool] = None  # informational; corpus tasks only
     used_fallback: bool = False  # corpus tasks only: REQUIRED had no real reference
@@ -65,6 +66,15 @@ class Task:
 
 def _byte_len(text: str) -> int:
     return len(text.encode("utf-8", "surrogateescape"))
+
+
+def _witness_bytes(elements: list, indices) -> int:
+    """Byte size of rendering exactly the given index set against
+    `elements`, in original order. Used by the synthetic builders below to
+    compute `known_optimum_bytes` from each task's own known-minimal
+    witness set (the unique inclusion-minimal True kept-set each of those
+    predicates admits), not from any per-task constant."""
+    return _byte_len("".join(elements[i] for i in sorted(indices)))
 
 
 def _line_count(text: str) -> int:
@@ -231,6 +241,7 @@ def build_hit_tasks() -> list[Task]:
                         elements=elements,
                         predicate_on_kept=_subset_predicate(frozenset(required_idx)),
                         known_optimum=k,
+                        known_optimum_bytes=_witness_bytes(elements, required_idx),
                     )
                 )
     return tasks
@@ -266,6 +277,12 @@ def build_nest_tasks() -> list[Task]:
                 elements=elements,
                 predicate_on_kept=predicate_on_kept,
                 known_optimum=2 * d,
+                # Every element is a single-byte ASCII bracket, and any
+                # True witness needs >= 2*d of them (balanced, depth >= d
+                # is impossible in fewer), so the minimal witness is
+                # exactly 2*d bytes regardless of which 2*d indices it is
+                # -- no need to track which ones after padding-shuffle.
+                known_optimum_bytes=2 * d,
             )
         )
     return tasks
@@ -296,6 +313,7 @@ def build_chain_tasks() -> list[Task]:
                 elements=elements,
                 predicate_on_kept=predicate_on_kept,
                 known_optimum=length,
+                known_optimum_bytes=_witness_bytes(elements, chain),
             )
         )
     return tasks
@@ -315,6 +333,7 @@ def build_blocks_tasks() -> list[Task]:
                 elements=elements,
                 predicate_on_kept=_subset_predicate(required),
                 known_optimum=core_size,
+                known_optimum_bytes=_witness_bytes(elements, required),
             )
         )
     return tasks
