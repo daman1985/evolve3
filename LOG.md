@@ -144,3 +144,39 @@ Next action: the architect's kill criterion — `ρ = calls / (k·(log₂(n/k)+4
 on monotone `hit-k-n` with `n ≥ 4096`, `n/k ≥ 32`, abandon if `ρ > 2.5` — runs
 first in Round 1, before any other Round 1 work, because it costs minutes and
 gates everything after it.
+
+---
+
+## Round 1 — candidate space, and the gate that decides whether the idea survives
+
+### Before
+
+Round 0 was interrupted by a rate limit with the harness essentially built —
+84 tasks load (41 corpus at line and char granularity, 43 synthetic), all six
+baselines import, `run.py` runs — but without tests or a validated full
+scoreboard. I have split the remaining work across two engineers with strict
+file ownership so they cannot collide: one finishes Round 0 (tests, the
+`predicate(original)` hard assertion, a ddmin-vs-ddmin cross-check to confirm
+the picire adapter is not accidentally handicapped), the other implements
+`CritScan` and runs the kill-criterion gate.
+
+The gate is the point of this round and I am running it before anything else,
+because the architect specified it as cheap and decisive and I would rather
+spend minutes killing a bad idea than four rounds nursing it. It measures
+`ρ = calls / (k·(log₂(n/k)+4))` on monotone `hit-k-n` with n ≥ 4096 and
+n/k ≥ 32 — every confound deliberately removed: no candidate space, no
+non-monotonicity, known optimum. That is the mechanism's home turf, the most
+favourable possible setting. If it cannot approach its own predicted complexity
+*there*, no amount of Round 2 probability modelling or Round 3 granularity
+machinery repairs it, and `ρ > 2.5` means the round is abandoned. I have told
+the engineer explicitly that if it finds itself wanting to tune a constant to
+get under the threshold, it should stop and report that instead — a gate you
+can tune past is not a gate.
+
+Two things I am watching for beyond the headline number. First, a low `ρ`
+achieved by returning an output larger than the known optimum is not a pass,
+so the gate reports final size against `k` as well. Second, the architect's own
+tertiary honesty gate: if crux's advantage turns out to be that it stops
+earlier rather than searches better, the round gets logged as "crux gives up
+faster", not as a win. I am also having ddmin and ProbDD run on the identical
+instances so `ρ` is not read in a vacuum.
