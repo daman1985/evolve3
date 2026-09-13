@@ -133,7 +133,14 @@ def _call_method(name: str, problem: ReductionProblem, kept: tuple):
     raise ValueError(f"unknown method {name!r}")
 
 
-def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, queue: "mp.Queue") -> None:
+def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, conn) -> None:
+    # A Pipe, not a Queue: Queue.put() lazily starts an internal feeder
+    # thread on first use, and observed in practice (see the reducer-
+    # engineer report): a process that has just hit RLIMIT_AS can be too
+    # memory-starved to start that thread, turning a clean, reportable
+    # MemoryError into an unreported SIGKILL-equivalent crash. Connection.send()
+    # writes directly with no new thread, so the error still gets home even
+    # from a process this constrained.
     try:
         try:
             import resource
@@ -160,7 +167,7 @@ def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, 
         # the only check that does.
         sound = result is not None and bool(raw_predicate(tuple(sorted(result))))
 
-        queue.put(("ok", {
+        conn.send(("ok", {
             "calls": oracle.calls,
             "cache_hits": oracle.cache_hits,
             "result_size": len(result) if result is not None else None,
@@ -170,9 +177,20 @@ def _child_main(method_name: str, elements, raw_predicate, n: int, budget: int, 
             "result": tuple(sorted(result)) if result is not None else None,
         }))
     except MemoryError:
-        queue.put(("error", "MemoryError (hit the per-run RLIMIT_AS cap)"))
+        try:
+            conn.send(("error", "MemoryError (hit the per-run RLIMIT_AS cap)"))
+        except Exception:
+            pass  # even the error report didn't fit; the parent's exitcode fallback still reports this cell
     except Exception:
-        queue.put(("error", traceback.format_exc()))
+        try:
+            conn.send(("error", traceback.format_exc()))
+        except Exception:
+            pass
+    finally:
+        try:
+            conn.close()
+        except Exception:
+            pass
 
 
 def _empty_row(**overrides) -> dict:
@@ -186,11 +204,23 @@ def _empty_row(**overrides) -> dict:
 
 
 def run_one_method(method_name: str, elements, raw_predicate, n: int, budget: int, ctx) -> dict:
-    queue: mp.Queue = ctx.Queue()
-    proc = ctx.Process(target=_child_main, args=(method_name, elements, raw_predicate, n, budget, queue))
+    parent_conn, child_conn = ctx.Pipe(duplex=False)
+    proc = ctx.Process(target=_child_main, args=(method_name, elements, raw_predicate, n, budget, child_conn))
     start = time.monotonic()
     proc.start()
-    proc.join(PER_RUN_TIMEOUT)
+    child_conn.close()  # only the child writes; drop the parent's write-side reference to it
+
+    result_row = None
+    if parent_conn.poll(PER_RUN_TIMEOUT):
+        try:
+            status, payload = parent_conn.recv()
+            if status == "ok":
+                result_row = _empty_row(**payload)
+            else:
+                result_row = _empty_row(crashed=True, seconds=time.monotonic() - start, error=payload)
+        except EOFError:
+            pass  # child died before finishing its send -- fall through to the exitcode-based report below
+    proc.join(max(0.0, PER_RUN_TIMEOUT - (time.monotonic() - start)))
 
     if proc.is_alive():
         proc.terminate()
@@ -198,17 +228,16 @@ def run_one_method(method_name: str, elements, raw_predicate, n: int, budget: in
         if proc.is_alive():
             proc.kill()
             proc.join()
+        parent_conn.close()
         return _empty_row(timed_out=True, seconds=time.monotonic() - start,
                            error=f"exceeded the {PER_RUN_TIMEOUT:.0f}s per-run wall-clock cap")
 
-    if not queue.empty():
-        status, payload = queue.get()
-        if status == "ok":
-            return _empty_row(**payload)
-        return _empty_row(crashed=True, seconds=time.monotonic() - start, error=payload)
+    parent_conn.close()
+    if result_row is not None:
+        return result_row
 
-    # Process exited without putting anything on the queue: killed (OOM /
-    # RLIMIT_AS / SIGKILL) rather than raising a catchable exception.
+    # Process exited without ever sending anything: killed (OOM / RLIMIT_AS
+    # / SIGKILL) rather than raising a catchable exception.
     return _empty_row(
         crashed=True, seconds=time.monotonic() - start,
         error=f"child exited with code {proc.exitcode} and produced no result "
