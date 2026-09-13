@@ -135,6 +135,26 @@ def structurally_valid(text: str, fmt: str) -> bool:
         try:
             ast.parse(text)
             return True
+        except SyntaxError as e:
+            # CPython's own parser has a hardcoded nesting ceiling (currently
+            # 200 levels of bracket/block nesting -- CPython Parser/pegen.c
+            # MAXLEVEL, not affected by sys.setrecursionlimit) and refuses
+            # to parse anything past it, regardless of whether the code is
+            # otherwise well-formed. One corpus entry
+            # (shrinkray-libcst-deep-nesting) is *specifically* a
+            # deep-nesting stress case whose original AND reference both
+            # exceed that ceiling (~400 levels) -- i.e. every file this
+            # task could ever consider "correct" is already unparseable by
+            # ast.parse, independent of the reduction quality being
+            # measured. Falling back to the same cheap balanced-delimiter
+            # check every other bracket-based format uses keeps the
+            # ceiling from masquerading as a real syntax error, without
+            # weakening ast.parse's role as the real check for genuine
+            # python syntax errors (message text is CPython's own, stable
+            # across versions; anything else still fails as before).
+            if "too many nested" in str(e):
+                return _balanced_brackets(text)
+            return False
         except Exception:
             return False
     if fmt in _CNF_FORMATS:
