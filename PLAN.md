@@ -5,6 +5,93 @@ Project code: `crux/`. Run log: `LOG.md`. Final writeup: `SUMMARY.md`.
 
 ---
 
+## 0. Amendment log
+
+The plan below was pre-registered before any code was written. Amendments are
+recorded here rather than edited silently, because the fact that a premise
+changed under measurement is part of the result.
+
+### Amendment 1 (2026-09-13, before any Round 1 implementation)
+
+Two corrections, both prompted by review of the original plan.
+
+**1a. Perses was missing from the baseline set.** Multiple 2026 surveys still
+call it the state-of-the-art domain-agnostic reducer for hierarchically
+structured inputs — i.e. exactly the compiler-crash case this plan uses as its
+motivating example. It is now a baseline. It vendors cleanly: the project
+ships a prebuilt `perses_deploy.jar` (v2.7, 77MB) requiring only a JDK (Java 21
+is present), so no Bazel build is needed. It covers c, cpp, go, java,
+javascript, python3, rust, scala, xml and yaml, plus generic `line` and
+`dyck-brace`/`dyck-brace-parenthesis` modes. Its absence would have materially
+weakened the "beats the best-known method" claim, because the corpus is
+dominated by hierarchically structured inputs; there is no practical reason to
+leave it out.
+
+**1b. The MUS query-complexity argument had an unmeasured assumption in it,
+and the measurement does not support it.** MUS extraction assumes a query
+returns meaningful information. On flat text it usually does not, because most
+subsets of a source file are not valid syntax. Measured on the real corpus with
+real parsers (`clang -fsyntax-only`, `ast.parse`, `node --check`,
+`json.loads`), 432 seeded trials per cell:
+
+| granularity | candidate shape | parses at all |
+|---|---|---|
+| line | scattered (uniform random deletion) | **6.5%** |
+| line | contiguous chunk (ddmin-shaped) | 22.9% |
+| char | scattered | **0.0%** (0 of 432) |
+| char | contiguous chunk | 7.9% |
+
+By language at line+scattered: cpp 2.2%, js 0.0%, py 5.6%, json 22.2%.
+
+Two consequences, neither of which the original thesis survived intact:
+
+- **The complexity win was in the wrong currency.** Scattered candidate sets
+  parse 3.5x worse than contiguous ones. Scattered sets are precisely what
+  progression/QuickXplain selection produces and precisely where its query
+  advantage comes from. So the MUS port is hit *harder* by the syntax problem
+  than ddmin is, not less. The original plan's implicit claim that MUS
+  sidesteps this is contradicted by measurement.
+- **Permanent critical marks are unsound on flat text.** Criticality is
+  permanent only under monotonicity, and syntax validity breaks monotonicity
+  in the most elementary way: deleting `{` fails, deleting `{` and `}`
+  together succeeds. A failure caused by syntactic entanglement would mark an
+  element permanently critical when it is not required at all. That is a
+  correctness bug that silently inflates final size, not merely an
+  inefficiency.
+
+**The revised thesis** separates two layers that the original plan conflated:
+
+- **Candidate space** — flat text / delimiter-structured / parse tree.
+  Determines what fraction of candidates are well-formed at all.
+- **Search** — which subsets to try, in what order. Determines
+  queries-to-minimal *given* a candidate space.
+
+Perses's contribution is the candidate space. Primary-source evidence: the v2.7
+jar's own defaults are `--default-list-minimizer-for-hdd "CDD"` and
+`--latra-transformation-list-minimizer "WPROBDD"`. Its search *inside* the
+structural space is still ddmin-family, and it exposes the list minimizer as a
+pluggable option. So the defensible claim is not "MUS beats Perses". It is:
+**the structural layer and the search layer are separable; Perses solved the
+first and left the second as ddmin-family; a better search composes with
+either.** Narrower than the original claim, and the only version the data
+supports.
+
+Consequences for the rest of the plan: structural awareness is load-bearing
+from Round 1 and can no longer be deferred to Round 3 (§4 revised); the
+experiment becomes a cross product of candidate space x search rather than a
+tool-vs-tool comparison (§2 revised); and grammar-free structural reduction is
+explicitly **not** claimed as novel, since Perses already ships `dyck-brace`
+modes.
+
+**What the claim is worth without Perses, stated plainly:** if Perses could not
+have been vendored, the honest position would have been that we had beaten the
+best-known *flat-text* reducers while leaving the best-known *structural* one
+untested — which, on a corpus of source files, would be close to no claim at
+all about the state of the art. It vendored, so this is moot; recorded because
+the original plan omitted it without noticing.
+
+---
+
 ## 1. The problem
 
 **Automated test-case reduction (a.k.a. test-case minimisation / delta debugging).**
@@ -64,6 +151,7 @@ are:
 | CDD | faithful reimplementation from FSE'24 | the paper's own simplification that matches ProbDD |
 | linear/greedy | trivial | the naive rung, for scale |
 | `shrinkray` | github.com/DRMacIver/shrinkray @ 26.7.8.0 | current best practical general-purpose reducer; run head-to-head where installable (needs py3.12 + uv, available here) |
+| **Perses** | prebuilt `perses_deploy.jar` v2.7 + JDK 21 | state-of-the-art *structural* (grammar-based, HDD-family) reducer; see Amendment 1a |
 
 Benchmark inputs are the **MIT-licensed real bug corpus from `shrinkray`'s own
 evaluation suite** (22 entries: gcc/clang ICEs, rustc, tsc, terser, prettier,
@@ -161,6 +249,34 @@ geometric mean keeps it scale-free and stops one huge task dominating. `E`,
 with the full per-task table — no single number is allowed to hide a
 regression.
 
+**Experimental design (revised by Amendment 1b).** A structure-aware reducer
+measured against flat-text ProbDD is a strawman comparison and will not be
+shipped. The experiment is therefore a **cross product**, not a tool-vs-tool
+shootout:
+
+|  | ddmin | CDD | ProbDD | crux search |
+|---|---|---|---|---|
+| **flat text** | ref | . | . | . |
+| **delimiter-structured** | . | . | . | . |
+| **parse tree** | . | . | . | . |
+
+The claim that matters is read **across a row**: *for a fixed candidate space,
+which search reaches minimal in fewest oracle calls?* A win that only appears
+when comparing our structured reducer against someone else's flat one is not a
+result about search at all, and the auditor's job includes catching exactly
+that. End-to-end whole-tool comparisons against Perses and shrinkray on
+identical oracles are reported **in addition**, clearly labelled as
+tool-vs-tool rather than search-vs-search.
+
+**Local well-formedness filtering is permitted and must be reported.** A
+reducer may run its own cheap syntax check before spending an oracle call.
+This is not oracle introspection — it uses only the input's own syntax, which
+Perses, C-Reduce and shrinkray all exploit, and it reflects the real cost model
+(a local parse is microseconds; the oracle is seconds to minutes). But every
+result must report `filtered` — candidates rejected locally without an oracle
+call — alongside `calls`, so that a reduction in oracle calls achieved by
+moving work into the filter is visible rather than hidden.
+
 **Success criteria, stated before any code is written:**
 
 - **Minimum bar**: `E(crux) < E(ProbDD)` and `E(crux) < E(ddmin)`, with
@@ -226,19 +342,26 @@ missed cheat invalidates the entire run, so this is worth the strong model.
 **Seven rounds (0–6).** One paragraph in `LOG.md` before each ("what I'm about
 to try and why"), one after ("what happened, what the number came out to").
 
+Revised by Amendment 1b: structural awareness is load-bearing from Round 1 and
+is no longer deferred to Round 3.
+
 | Round | Focus | Exit condition |
 |---|---|---|
-| 0 | Harness, corpus import, all baselines wired, validity gate, first scoreboard | every baseline runs on every task; `E(ddmin)` recorded |
-| 1 | Core: critical marking + progression + refinement | `E` beats ddmin; first honest comparison to ProbDD |
-| 2 | Locality-smoothed deletability model driving candidate generation | `E` improves over round 1 |
-| 3 | Multi-granularity fixpoint + structural chunking (lines/tokens/chars, bracket-aware) | `geomean s` approaches 1.0 |
+| 0 | Harness, corpus import, all baselines wired (incl. Perses), validity gate, first scoreboard | every baseline runs on every task; `E(ddmin)` recorded |
+| 1 | Candidate-space layer: flat / delimiter-structured / parse-tree, with the local well-formedness filter. Measure the 6.5% figure moving. | the cross-product table has a populated `ddmin` column across all three spaces |
+| 2 | Core search: critical marking + progression + refinement, inside whichever candidate space Round 1 shows is sound | `E` beats ddmin *within the same candidate space*; criticality soundness verified |
+| 3 | Locality-smoothed deletability model driving candidate generation | `E` improves over round 2 |
 | 4 | Architect's call, driven by where calls are actually being spent | `E` improves or the round is logged as a dead end with reasoning |
-| 5 | Head-to-head vs. `shrinkray` on real oracles; fix what loses | honest head-to-head table published |
+| 5 | End-to-end head-to-head vs. Perses and `shrinkray` on identical oracles | honest tool-vs-tool table published, separate from the search-vs-search claim |
 | 6 | Packaging: CLI hardening, Claude Code skill, docs, final measurement | tool runs end-to-end on a bug it has never seen |
 
 **Done means:**
 1. `E(crux)` beats every baseline, with `geomean s` no worse than ProbDD's — the
    minimum bar in §2, verified by the auditor on a clean re-run.
+1b. The cross-product table in §2 shows the search win **within a fixed
+   candidate space**, not only across differently-equipped tools. If the win
+   exists only across spaces, the result is a packaging result, not a search
+   result, and SUMMARY.md says so in those words.
 2. A per-task table published in SUMMARY.md including every task where crux
    *loses*, if any.
 3. `crux --oracle X --input Y` works on a real bug outside the benchmark set.
