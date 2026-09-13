@@ -180,3 +180,64 @@ tertiary honesty gate: if crux's advantage turns out to be that it stops
 earlier rather than searches better, the round gets logged as "crux gives up
 faster", not as a win. I am also having ddmin and ProbDD run on the identical
 instances so `ρ` is not read in a vacuum.
+
+### Round 0 — after
+
+Round 0 is done, and the useful output of it is not the scoreboard but two
+bugs that would have invalidated everything downstream, plus a third the
+engineer correctly refused to fix on its own authority.
+
+**`run.py` crashed on every invocation.** `compute_metrics` read
+`Task.known_optimum_bytes`, a field that never existed — only `known_optimum`
+(element count) did. So the harness had never successfully produced a number.
+Fixed by adding the field, populated from each synthetic family's actual
+minimal witness rather than a guess.
+
+**The ddmin reference was using the wrong picire cache.** `ddmin_picire.py`
+used picire's `ContentCache` while its own docstring asserted equivalence to
+the real CLI default, `ConfigCache`. They are not equivalent: on
+`ujson-510-indent-buffer-overflow@char` the choice is worth 580 real calls
+versus 3033, over 5x. The equivalence holds only when every element renders to
+unique text, which is true of the synthetic families and false of every real
+corpus entry, since source code is full of repeated tokens. The engineer
+switched to `ConfigCache` to match picire's shipped defaults.
+
+That fix is correct on faithfulness grounds and it immediately exposed a
+deeper problem that is *ours*, not picire's. Our own `Oracle` caches on
+`frozenset(kept)` — an index set — not on rendered content. The real cost model
+is "compile this file": if two different index sets render to byte-identical
+text, running the oracle twice is waste any competent reducer avoids, and
+shrinkray and picire both cache on content for exactly that reason. Since
+`c_t = calls / calls(ddmin_picire)` is the cost metric for the entire study, an
+inflated ddmin denominator makes every other method look better than it is —
+and the architect had already flagged, unprompted, that this particular choice
+"flatters us". I am not fixing it on my own judgement; the auditor is checking
+whether content-hash caching is the right cost model, whether it would change
+the *ranking* rather than just the scale, and whether I have missed an argument
+for keeping index-set caching. It runs in our favour, so it gets scrutiny
+rather than a quiet patch.
+
+**The corpus oracle can be satisfied by comment text.** On
+`gcc49-udlit-char-pack-template`, the recipe derived `required["a"]=4` from the
+C-Reduce reference, where `a` is a renamed single-letter identifier; in the
+original those `a`s live mostly inside a prose comment. So the predicate can be
+satisfied by text unrelated to the bug, and a reducer that correctly deletes
+comments is penalised for it. The engineer diagnosed this and explicitly did
+not fix it, on the grounds that `corpus_recipe.py` is the shared oracle
+definition every round's numbers depend on and it wasn't in its brief — which
+is the right call. The auditor is checking whether the uniform fix (strip
+comments before deriving required tokens and before evaluating the predicate)
+is right, and whether the same collision exists on entries nobody has looked at.
+
+Two results worth keeping from the cross-check. picire's ddmin uses **9.5x
+fewer calls** than a literal transcription of Zeller's Fig. 8, because on a
+successful complement reduction it resumes scanning from an offset instead of
+re-splitting the whole sequence into fresh chunks — so the reference denominator
+is the strong implementation, not a weak one. And `linear` provably cannot
+reduce the `nest` family at all while `probdd` degenerates the same way, both
+because deleting a single bracket always breaks balance parity: a concrete
+confirmation of the exact critique PLAN.md already levels at ProbDD's
+independence assumption, arrived at from the other direction.
+
+215 tests pass. The corpus hard assertion `predicate(original) is True` holds
+for all 22 entries with no per-entry special-casing.
